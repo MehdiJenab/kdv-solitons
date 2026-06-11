@@ -269,7 +269,7 @@
                 </div>
             </div>
 
-            <h3 class="section-title">Conserved quantities — drift from t = 0 (should stay ≈ 0)</h3>
+            <h3 class="section-title">Conserved quantities — relative drift (%) (should stay ≈ 0)</h3>
             <div class="chart-container small">
                 <canvas id="invariantsChart"></canvas>
             </div>
@@ -344,16 +344,22 @@
                 maintainAspectRatio: false,
                 scales: {
                     x: {
+                        type: 'linear',
                         title: { display: true, text: 'Time (t)' },
+                        ticks: { maxTicksLimit: 8, maxRotation: 0, precision: 2 }
+                    },
+                    y: {
+                        title: { display: true, text: 'relative drift (%)' },
                         ticks: {
-                            maxTicksLimit: 11,
-                            maxRotation: 0,
-                            callback: function (value) {
-                                return Number(this.getLabelForValue(value)).toFixed(1);
+                            callback: (v) => {
+                                const a = Math.abs(v);
+                                if (a !== 0 && (a < 1e-3 || a >= 1e4)) {
+                                    return v.toExponential(1) + '%';
+                                }
+                                return (Math.round(v * 1000) / 1000) + '%';
                             }
                         }
-                    },
-                    y: { title: { display: true, text: 'I(t) − I(0)' } }
+                    }
                 }
             }
         });
@@ -874,11 +880,20 @@
         // --- Conserved-quantities drift chart -------------------------------
         function drawInvariants(run) {
             if (!run.invariants) return;
-            invariantsChart.data.labels = run.times;
             ['mass', 'momentum', 'energy'].forEach((k, i) => {
                 const arr = run.invariants[k];
                 const base = arr[0];
-                invariantsChart.data.datasets[i].data = arr.map(v => v - base);
+                // Normalize to a percentage of the initial value. For a zero-mean
+                // field (e.g. a cosine has mass 0) fall back to the largest
+                // magnitude over the run so the percentage stays finite.
+                let scale = Math.abs(base);
+                if (scale < 1e-9) {
+                    scale = Math.max(1e-9, ...arr.map(Math.abs));
+                }
+                invariantsChart.data.datasets[i].data = run.times.map((t, j) => ({
+                    x: t,
+                    y: (100 * (arr[j] - base)) / scale
+                }));
             });
             invariantsChart.update();
         }
