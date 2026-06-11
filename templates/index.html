@@ -137,6 +137,19 @@
             margin: 0;
         }
         .playback #scrub { flex: 1; min-width: 160px; }
+        .view-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 12px;
+        }
+        .view-controls button {
+            padding: 4px 10px;
+            font-size: 13px;
+            margin: 0;
+        }
+        .view-controls #view-shift { flex: 1; min-width: 140px; }
         .playback select { padding: 4px; }
         #export-csv, #export-png, #share-btn { background-color: #7f8c8d; }
         #export-csv:hover, #export-png:hover, #share-btn:hover { background-color: #616a6b; }
@@ -257,6 +270,16 @@
 
         <div id="status" class="status stopped">
             Ready to run simulation
+        </div>
+
+        <div class="control-group view-controls">
+            <label>View window:</label>
+            <button type="button" id="view-left" title="shift left (periodic)">◀</button>
+            <input type="range" id="view-shift" min="0" max="100" step="1" value="0">
+            <button type="button" id="view-right" title="shift right (periodic)">▶</button>
+            <button type="button" id="view-center">Center on peak</button>
+            <button type="button" id="view-reset">Reset</button>
+            <span class="derived">start x = <span id="view-start-label">0</span></span>
         </div>
 
         <div class="chart-container">
@@ -432,6 +455,35 @@
 
         // Handle to the running animation interval (null when idle)
         let animationTimer = null;
+
+        // View-window state: the periodic domain can be "rolled" so the plot
+        // starts at any x0 (fraction of L). viewSource holds the field currently
+        // shown (preview or a run frame) so it can be re-rendered on shift.
+        let viewStartFrac = 0;
+        let viewSource = null;   // { values: number[], L: number }
+
+        // Redraw the main profile chart for the current view shift: roll the
+        // field so the window starts at x0 = viewStartFrac * L, and label the
+        // x-axis with the (unwrapped) physical positions x0 .. x0 + L.
+        function redrawProfile() {
+            if (!viewSource) return;
+            const { values, L } = viewSource;
+            const n = values.length;
+            const dx = L / n;
+            const k = (((Math.round(viewStartFrac * n)) % n) + n) % n;
+            const x0 = viewStartFrac * L;
+            const data = new Array(n);
+            const labels = new Array(n);
+            for (let i = 0; i < n; i++) {
+                data[i] = values[(i + k) % n];
+                labels[i] = x0 + i * dx;
+            }
+            solitonChart.data.labels = labels;
+            solitonChart.data.datasets[0].data = data;
+            solitonChart.update();
+            const lbl = document.getElementById('view-start-label');
+            if (lbl) lbl.textContent = x0.toFixed(0);
+        }
 
         // --- Soliton list state ---------------------------------------------
         // Each soliton is {kappa, x0}. Amplitude = 2*kappa^2, speed = 4*kappa^2.
@@ -660,8 +712,6 @@
             const field = initialField(gridPoints, L);
 
             solitonChart.options.animation = false;
-            solitonChart.data.labels = gridPoints;
-            solitonChart.data.datasets[0].data = field;
             solitonChart.data.datasets[0].label = 'Initial condition (t = 0)';
 
             let mx = 0, mn = 0;
@@ -669,7 +719,9 @@
             const pad = 0.1 * (mx - mn || 1);
             solitonChart.options.scales.y.min = mn - pad;
             solitonChart.options.scales.y.max = mx + pad;
-            solitonChart.update();
+
+            viewSource = { values: field, L: L };
+            redrawProfile();
 
             document.getElementById('status').className = 'status stopped';
             document.getElementById('status').textContent =
@@ -877,12 +929,29 @@
         function renderFrame(i) {
             if (!lastRun) return;
             currentFrame = i;
-            solitonChart.data.datasets[0].data = lastRun.solutions[i];
             solitonChart.data.datasets[0].label = `u(x) at t = ${lastRun.times[i].toFixed(3)}`;
-            solitonChart.update();
+            viewSource = { values: lastRun.solutions[i], L: lastRun.L };
+            redrawProfile();
             document.getElementById('scrub').value = i;
             document.getElementById('frame-label').textContent =
                 `t = ${lastRun.times[i].toFixed(3)}  (frame ${i + 1}/${lastRun.times.length})`;
+        }
+
+        // Center the view on the tallest feature of the current profile.
+        function centerOnPeak() {
+            if (!viewSource) return;
+            const vals = viewSource.values;
+            const n = vals.length;
+            let mi = 0, mv = -Infinity;
+            for (let i = 0; i < n; i++) {
+                const a = Math.abs(vals[i]);
+                if (a > mv) { mv = a; mi = i; }
+            }
+            const k = (((mi - Math.floor(n / 2)) % n) + n) % n;
+            viewStartFrac = k / n;
+            const slider = document.getElementById('view-shift');
+            if (slider) slider.value = Math.round(viewStartFrac * 100);
+            redrawProfile();
         }
 
         document.getElementById('play-btn').addEventListener('click', () => {
@@ -897,6 +966,24 @@
         document.getElementById('speed').addEventListener('change', () => {
             if (playing) startPlayback();
         });
+
+        // --- View-window (periodic pan) controls ----------------------------
+        function setViewShift(percent) {
+            const p = ((percent % 100) + 100) % 100;   // wrap [0,100)
+            viewStartFrac = p / 100;
+            document.getElementById('view-shift').value = p;
+            redrawProfile();
+        }
+        document.getElementById('view-shift').addEventListener('input', (e) => {
+            viewStartFrac = parseInt(e.target.value, 10) / 100;
+            redrawProfile();
+        });
+        document.getElementById('view-left').addEventListener('click', () =>
+            setViewShift(parseInt(document.getElementById('view-shift').value, 10) - 5));
+        document.getElementById('view-right').addEventListener('click', () =>
+            setViewShift(parseInt(document.getElementById('view-shift').value, 10) + 5));
+        document.getElementById('view-center').addEventListener('click', centerOnPeak);
+        document.getElementById('view-reset').addEventListener('click', () => setViewShift(0));
 
         // --- Space-time (x, t) heatmap --------------------------------------
         function jetColor(t) {
@@ -1053,9 +1140,12 @@
                 solitonChart.options.animation = false;
                 solitonChart.options.scales.y.min = yMin - pad;
                 solitonChart.options.scales.y.max = yMax + pad;
-                solitonChart.data.labels = gridPoints;
 
-                lastRun = { times, solutions, gridPoints, invariants: data.invariants };
+                lastRun = {
+                    times, solutions, gridPoints,
+                    L: parseFloat(data.params.L),
+                    invariants: data.invariants
+                };
                 currentFrame = 0;
 
                 const scrub = document.getElementById('scrub');
