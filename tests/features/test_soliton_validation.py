@@ -11,6 +11,7 @@ from kdv_solver.solver import (
     Grid,
     KdVProblem,
     PseudoSpectralSolver,
+    cosine_wave,
     gaussian_packet,
     multi_soliton_field,
 )
@@ -260,3 +261,29 @@ class TestGaussianPacket:
             dx * solutions[0].sum(), rel=1e-3
         )
         assert np.all(np.isfinite(solutions[-1]))
+
+
+class TestFPUTRecurrence:
+    """Zabusky-Kruskal: a cosine breaks into solitons that nearly recur."""
+
+    def test_cosine_recurs(self) -> None:
+        """The field departs far from the initial cosine, then returns close
+        to it (the Fermi-Pasta-Ulam-Tsingou recurrence)."""
+        grid = Grid(512, 20.0)
+        problem = KdVProblem(grid, kappa=1.0)  # kappa unused for the custom field
+        solver = PseudoSpectralSolver(problem, dt=2e-3)
+
+        u0 = cosine_wave(grid, amplitude=0.9, mode=1)
+        _, solutions = solver.solve_with_history(9.0, n_snapshots=90, u0=u0)
+
+        ref = solutions[0] - solutions[0].mean()
+
+        def corr(u: np.ndarray) -> float:
+            v = u - u.mean()
+            return float(np.dot(ref, v) / (np.linalg.norm(ref) * np.linalg.norm(v)))
+
+        correlations = [corr(u) for u in solutions]
+        # It first decorrelates strongly (breaks into solitons) ...
+        assert min(correlations) < 0.3
+        # ... then returns close to the initial cosine near the recurrence.
+        assert max(correlations[len(correlations) // 2 :]) > 0.95

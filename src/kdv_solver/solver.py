@@ -96,6 +96,27 @@ def gaussian_packet(
     return amplitude * np.exp(-(x_shifted**2) / (2 * width**2))
 
 
+def cosine_wave(grid: "Grid", amplitude: float, mode: int = 1) -> np.ndarray:
+    """
+    Build a cosine initial condition: ``A * cos(2*pi*mode*x / L)``.
+
+    This is the Zabusky-Kruskal (1965) setup. A smooth cosine is not a KdV
+    eigenstate: it steepens, breaks into a rank-ordered train of solitons, and
+    -- because KdV is integrable on the periodic domain -- the solitons later
+    re-align to nearly reconstruct the initial cosine (the Fermi-Pasta-Ulam-
+    Tsingou recurrence). ``mode`` must be an integer so the wave is periodic.
+
+    Args:
+        grid: Discretization grid
+        amplitude: Peak height A
+        mode: Number of full wavelengths across the domain
+
+    Returns:
+        Cosine field on the grid
+    """
+    return amplitude * np.cos(2 * np.pi * mode * grid.x / grid.L)
+
+
 @dataclass
 class Grid:
     """Uniform grid with periodic boundary conditions."""

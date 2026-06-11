@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Simple web interface for KdV soliton propagation visualization."""
 
+import numpy as np
 from flask import Flask, jsonify, render_template, request
 
 from kdv_solver.solver import (
     Grid,
     KdVProblem,
     PseudoSpectralSolver,
+    cosine_wave,
     gaussian_packet,
     multi_soliton_field,
 )
@@ -41,13 +43,18 @@ def simulate():
             for s in (params.get('solitons') or [])
         ]
         gaussians = params.get('gaussians') or []
-        if not soliton_specs and not gaussians:
+        cosines = params.get('cosines') or []
+        if not soliton_specs and not gaussians and not cosines:
             soliton_specs = [(float(params.get('kappa', 0.5)), grid.L / 2)]
 
         u0 = multi_soliton_field(grid, soliton_specs)
         for g in gaussians:
             u0 = u0 + gaussian_packet(
                 grid, float(g['amplitude']), float(g['x0']), float(g['width'])
+            )
+        for c in cosines:
+            u0 = u0 + cosine_wave(
+                grid, float(c['amplitude']), int(c['mode'])
             )
 
         # Cap the number of time steps so a long lap (small kappa -> large
@@ -64,6 +71,16 @@ def simulate():
         times, solutions = solver.solve_with_history(
             t_final, n_snapshots=50, u0=u0
         )
+
+        # Guard against numerical blow-up: a soliton/packet that is too tall and
+        # narrow is under-resolved on the grid and diverges to NaN/Inf. Return a
+        # helpful message instead of emitting non-finite values (invalid JSON).
+        if not all(np.all(np.isfinite(u)) for u in solutions):
+            return jsonify({
+                'error': 'Simulation became unstable: a feature is too tall and '
+                         'narrow for this grid. Increase Grid Points, or reduce '
+                         'the soliton κ / packet amplitude.'
+            }), 400
 
         return jsonify({
             'success': True,

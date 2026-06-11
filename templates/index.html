@@ -72,13 +72,22 @@
             text-align: right;
         }
         .soliton-section { margin-bottom: 20px; }
-        #add-soliton {
+        #add-soliton, #add-gaussian, #add-cosine {
             padding: 4px 12px;
             font-size: 13px;
             margin: 0;
             background-color: #27ae60;
         }
-        #add-soliton:hover { background-color: #1e8449; }
+        #add-soliton:hover, #add-gaussian:hover, #add-cosine:hover {
+            background-color: #1e8449;
+        }
+        #preset-fput {
+            padding: 6px 14px;
+            font-size: 13px;
+            margin: 0;
+            background-color: #8e44ad;
+        }
+        #preset-fput:hover { background-color: #6c3483; }
         #solitons-list { margin-top: 10px; }
         .soliton-row {
             display: flex;
@@ -134,6 +143,13 @@
         <h1>KdV Soliton Propagation Simulator</h1>
 
         <div class="controls">
+            <div class="control-group">
+                <label>Presets:</label>
+                <button type="button" id="preset-fput" title="Zabusky-Kruskal cosine that breaks into solitons and recurs">
+                    ⟳ FPUT recurrence (Zabusky–Kruskal)
+                </button>
+            </div>
+
             <div class="control-group soliton-section" id="soliton-controls">
                 <label>Solitons:</label>
                 <button type="button" id="add-soliton">+ Add soliton</button>
@@ -146,9 +162,15 @@
                 <div id="gaussians-list"></div>
             </div>
 
+            <div class="control-group soliton-section" id="cosine-controls">
+                <label>Cosine waves:</label>
+                <button type="button" id="add-cosine">+ Add cosine</button>
+                <div id="cosines-list"></div>
+            </div>
+
             <div class="control-group">
                 <label for="N">Grid Points:</label>
-                <input type="range" id="N" min="64" max="512" step="64" value="256">
+                <input type="range" id="N" min="64" max="1024" step="64" value="256">
                 <span id="N-value">256</span>
                 <button type="button" class="step-btn" data-target="N" data-dir="-1">−</button>
                 <button type="button" class="step-btn" data-target="N" data-dir="1">+</button>
@@ -156,7 +178,7 @@
 
             <div class="control-group">
                 <label for="L">Domain Length:</label>
-                <input type="range" id="L" min="50" max="200" step="10" value="100">
+                <input type="range" id="L" min="10" max="200" step="10" value="100">
                 <span id="L-value">100</span>
                 <button type="button" class="step-btn" data-target="L" data-dir="-1">−</button>
                 <button type="button" class="step-btn" data-target="L" data-dir="1">+</button>
@@ -292,7 +314,7 @@
                 previewInitialCondition();
             });
             row.querySelector('.remove-btn').addEventListener('click', () => {
-                if (solitons.length + gaussians.length <= 1) return;  // keep one component
+                if (componentCount() <= 1) return;  // keep one component
                 solitons.splice(solitons.indexOf(s), 1);
                 renderSolitons();
                 updateFinalTimeForLap();
@@ -349,7 +371,7 @@
                 previewInitialCondition();
             });
             row.querySelector('.remove-btn').addEventListener('click', () => {
-                if (solitons.length + gaussians.length <= 1) return;  // keep one component
+                if (componentCount() <= 1) return;  // keep one component
                 gaussians.splice(gaussians.indexOf(g), 1);
                 renderGaussians();
                 updateFinalTimeForLap();
@@ -367,6 +389,58 @@
             });
         }
 
+        // --- Cosine wave list state (Zabusky-Kruskal) -----------------------
+        // Each cosine is {amplitude, mode}: A*cos(2*pi*mode*x/L).
+        let cosines = [];
+
+        function componentCount() {
+            return solitons.length + gaussians.length + cosines.length;
+        }
+
+        function makeCosineRow(c) {
+            const row = document.createElement('div');
+            row.className = 'soliton-row';
+            row.innerHTML = `
+                <span class="tag"></span>
+                <label>amplitude</label>
+                <input type="number" class="c-amp" min="0.1" max="3.0" step="0.1">
+                <label>mode</label>
+                <input type="number" class="c-mode" min="1" max="10" step="1">
+                <span class="derived">full wavelengths in the domain</span>
+                <button type="button" class="remove-btn" title="Remove cosine">×</button>
+            `;
+            const ampInp = row.querySelector('.c-amp');
+            const modeInp = row.querySelector('.c-mode');
+            ampInp.value = c.amplitude;
+            modeInp.value = c.mode;
+
+            ampInp.addEventListener('input', () => {
+                c.amplitude = parseFloat(ampInp.value) || 0.1;
+                updateFinalTimeForLap();
+            });
+            modeInp.addEventListener('input', () => {
+                c.mode = Math.max(1, Math.round(parseFloat(modeInp.value) || 1));
+                previewInitialCondition();
+            });
+            row.querySelector('.remove-btn').addEventListener('click', () => {
+                if (componentCount() <= 1) return;  // keep one component
+                cosines.splice(cosines.indexOf(c), 1);
+                renderCosines();
+                updateFinalTimeForLap();
+            });
+            return row;
+        }
+
+        function renderCosines() {
+            const list = document.getElementById('cosines-list');
+            list.innerHTML = '';
+            cosines.forEach((c, idx) => {
+                const row = makeCosineRow(c);
+                row.querySelector('.tag').textContent = 'Cosine ' + (idx + 1);
+                list.appendChild(row);
+            });
+        }
+
         // A characteristic timescale for one lap of the periodic domain, T = L/c,
         // using the SLOWEST component so everything completes at least one lap.
         // Soliton speed is 4*kappa^2; a Gaussian of height A behaves like a
@@ -374,7 +448,8 @@
         function referencePeriod() {
             const L = domainLength();
             const speeds = solitons.map(s => 4 * s.kappa * s.kappa)
-                .concat(gaussians.map(g => 2 * g.amplitude));
+                .concat(gaussians.map(g => 2 * g.amplitude))
+                .concat(cosines.map(c => 2 * c.amplitude));
             const cMin = speeds.length ? Math.min(...speeds) : 1;
             return L / cMin;
         }
@@ -410,6 +485,9 @@
                     const d = periodicDistance(x, g.x0, L);
                     u += g.amplitude * Math.exp(-(d * d) / (2 * g.width * g.width));
                 }
+                for (const c of cosines) {
+                    u += c.amplitude * Math.cos(2 * Math.PI * c.mode * x / L);
+                }
                 return u;
             });
         }
@@ -439,11 +517,13 @@
                 'Preview: initial condition at t = 0 — press Run Simulation to evolve it.';
         }
 
-        // Initialize with a single centered soliton and no Gaussians
+        // Initialize with a single centered soliton and no other components
         solitons = [{ kappa: 0.5, x0: domainLength() / 2 }];
         gaussians = [];
+        cosines = [];
         renderSolitons();
         renderGaussians();
+        renderCosines();
         updateFinalTimeForLap();
         updateParamDisplays();
 
@@ -482,6 +562,53 @@
             updateFinalTimeForLap();
         });
 
+        // Add a cosine wave
+        document.getElementById('add-cosine').addEventListener('click', () => {
+            cosines.push({ amplitude: 0.9, mode: 1 });
+            renderCosines();
+            updateFinalTimeForLap();
+        });
+
+        // Zabusky-Kruskal / FPUT recurrence preset: a single cosine on a small
+        // domain that breaks into ~3 solitons and nearly reassembles near t≈9
+        // (and again near t≈18).
+        document.getElementById('preset-fput').addEventListener('click', () => {
+            solitons = [];
+            gaussians = [];
+            cosines = [{ amplitude: 0.9, mode: 1 }];
+            document.getElementById('N').value = 512;
+            document.getElementById('L').value = 20;
+            document.getElementById('dt').value = 0.002;
+            renderSolitons();
+            renderGaussians();
+            renderCosines();
+            // Set the time window to span two recurrences; user can still edit it.
+            const tf = document.getElementById('t_final');
+            tf.min = 0.1;
+            tf.max = 40;
+            tf.step = 0.1;
+            tf.value = 18;
+            updateParamDisplays();
+            previewInitialCondition();
+        });
+
+        // Clamp any number input to its [min, max] on blur/enter, then re-fire
+        // 'input' so the component state and preview update. Prevents e.g. an
+        // out-of-range kappa that would make the simulation diverge.
+        document.addEventListener('change', (e) => {
+            const el = e.target;
+            if (!el.matches || !el.matches('input[type="number"]')) return;
+            let v = parseFloat(el.value);
+            if (isNaN(v)) return;
+            const lo = parseFloat(el.min), hi = parseFloat(el.max);
+            if (!isNaN(lo)) v = Math.max(lo, v);
+            if (!isNaN(hi)) v = Math.min(hi, v);
+            if (v !== parseFloat(el.value)) {
+                el.value = v;
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+        });
+
         // Stepper +/- buttons: nudge a slider by one step, clamped to its range
         function decimalsOf(step) {
             const s = String(step);
@@ -512,7 +639,8 @@
                 solitons: solitons.map(s => ({ kappa: s.kappa, x0: s.x0 })),
                 gaussians: gaussians.map(g => ({
                     amplitude: g.amplitude, x0: g.x0, width: g.width
-                }))
+                })),
+                cosines: cosines.map(c => ({ amplitude: c.amplitude, mode: c.mode }))
             };
 
             // Disable buttons during simulation

@@ -11,6 +11,7 @@ from kdv_solver.solver import (
     Grid,
     KdVProblem,
     PseudoSpectralSolver,
+    cosine_wave,
     gaussian_packet,
     multi_soliton_field,
     soliton_profile,
@@ -122,3 +123,10 @@ class TestSolitonProfiles:
         assert u.max() == pytest.approx(1.5, rel=1e-3)
         assert grid.x[int(np.argmax(u))] == pytest.approx(40.0, abs=grid.dx)
         assert np.all(u >= 0)
+
+    def test_cosine_wave(self) -> None:
+        grid = Grid(512, 20.0)
+        u = cosine_wave(grid, amplitude=0.9, mode=1)
+        assert u.max() == pytest.approx(0.9, rel=1e-3)
+        assert u.mean() == pytest.approx(0.0, abs=1e-12)  # zero-mean
+        assert u[0] == pytest.approx(0.9)  # cosine peaks at x=0 for mode 1

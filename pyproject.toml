@@ -2,7 +2,7 @@
 name = "kdv-solver"
 version = "0.1.0"
 description = "Pseudo-spectral solver for the Korteweg-de Vries equation"
-authors = [{ name = "Your Name", email = "you@example.com" }]
+authors = [{ name = "Mehdi Jenab", email = "mehdi.jenab@otilumionics.com" }]
 requires-python = ">=3.11"
 dependencies = [
     "numpy>=1.24",
