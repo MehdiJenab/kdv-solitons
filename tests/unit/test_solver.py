@@ -1,0 +1,124 @@
+"""Unit tests for the KdV solver building blocks.
+
+Covers grid validation, FFT-based spatial derivatives, and the snapshot-
+recording integration helper used by the visualization layer.
+"""
+
+import numpy as np
+import pytest
+
+from kdv_solver.solver import (
+    Grid,
+    KdVProblem,
+    PseudoSpectralSolver,
+    gaussian_packet,
+    multi_soliton_field,
+    soliton_profile,
+)
+
+
+class TestGridValidation:
+    """Grid parameter validation."""
+
+    def test_rejects_nonpositive_n(self) -> None:
+        with pytest.raises(ValueError, match="N must be positive"):
+            Grid(0, 100.0)
+
+    def test_rejects_nonpositive_l(self) -> None:
+        with pytest.raises(ValueError, match="L must be positive"):
+            Grid(64, 0.0)
+
+
+class TestSpectralDerivatives:
+    """FFT-based derivatives against an exact trigonometric reference."""
+
+    def _problem(self) -> tuple[KdVProblem, np.ndarray]:
+        # Domain [0, 2*pi) so integer wave numbers are represented exactly.
+        grid = Grid(64, 2 * np.pi)
+        problem = KdVProblem(grid, kappa=1.0)
+        return problem, grid.x
+
+    def test_compute_u_x(self) -> None:
+        problem, x = self._problem()
+        m = 3  # integer wave number -> exactly representable on the grid
+        u = np.sin(m * x)
+        expected = m * np.cos(m * x)
+        np.testing.assert_allclose(problem.compute_u_x(u), expected, atol=1e-12)
+
+    def test_compute_u_xxx(self) -> None:
+        problem, x = self._problem()
+        m = 3
+        u = np.sin(m * x)
+        expected = -(m**3) * np.cos(m * x)
+        # The k**3 factor amplifies round-off, so use a looser absolute tol.
+        np.testing.assert_allclose(problem.compute_u_xxx(u), expected, atol=1e-9)
+
+
+class TestSolveWithHistory:
+    """The snapshot-recording solve used for visualization."""
+
+    def test_history_shape_and_endpoints(self) -> None:
+        grid = Grid(256, 100.0)
+        problem = KdVProblem(grid, kappa=0.5)
+        solver = PseudoSpectralSolver(problem, dt=1e-3)
+
+        times, solutions = solver.solve_with_history(1.0, n_snapshots=10)
+
+        # times and solutions are aligned, monotonically increasing in time.
+        assert len(times) == len(solutions)
+        assert times[0] == 0.0
+        assert times[-1] == pytest.approx(1.0)
+        assert np.all(np.diff(times) > 0)
+
+        # First snapshot is the initial condition.
+        np.testing.assert_allclose(solutions[0], problem.initial_condition())
+
+        # Amplitude is conserved by the (correct) integrator.
+        assert solutions[-1].max() == pytest.approx(solutions[0].max(), rel=1e-2)
+
+    def test_single_step_history(self) -> None:
+        # t_final smaller than dt still yields at least one integration step.
+        grid = Grid(128, 100.0)
+        problem = KdVProblem(grid, kappa=0.5)
+        solver = PseudoSpectralSolver(problem, dt=1.0)
+
+        times, solutions = solver.solve_with_history(0.1, n_snapshots=50)
+
+        assert len(solutions) == 2  # initial condition + single step
+        assert times[-1] == pytest.approx(0.1)
+
+    def test_history_accepts_custom_u0(self) -> None:
+        # A custom initial field (e.g. multi-soliton) is used verbatim.
+        grid = Grid(256, 100.0)
+        problem = KdVProblem(grid, kappa=0.5)
+        solver = PseudoSpectralSolver(problem, dt=1e-3)
+
+        u0 = multi_soliton_field(grid, [(0.6, 30.0), (0.4, 70.0)])
+        _, solutions = solver.solve_with_history(0.5, n_snapshots=5, u0=u0)
+
+        np.testing.assert_allclose(solutions[0], u0)
+
+
+class TestSolitonProfiles:
+    """Single- and multi-soliton field builders."""
+
+    def test_profile_position_and_amplitude(self) -> None:
+        grid = Grid(512, 100.0)
+        u = soliton_profile(grid, kappa=0.7, x0=40.0, t=0.0)
+        # Amplitude is 2*kappa^2 (up to grid sampling) and the peak sits at x0.
+        assert u.max() == pytest.approx(2 * 0.7**2, rel=1e-2)
+        assert grid.x[int(np.argmax(u))] == pytest.approx(40.0, abs=grid.dx)
+
+    def test_multi_soliton_is_superposition(self) -> None:
+        grid = Grid(512, 100.0)
+        specs = [(0.8, 25.0), (0.5, 60.0)]
+        field = multi_soliton_field(grid, specs)
+        expected = soliton_profile(grid, 0.8, 25.0) + soliton_profile(grid, 0.5, 60.0)
+        np.testing.assert_allclose(field, expected)
+
+    def test_gaussian_packet(self) -> None:
+        grid = Grid(512, 100.0)
+        u = gaussian_packet(grid, amplitude=1.5, x0=40.0, width=4.0)
+        assert u.max() == pytest.approx(1.5, rel=1e-3)
+        assert grid.x[int(np.argmax(u))] == pytest.approx(40.0, abs=grid.dx)
+        assert np.all(u >= 0)

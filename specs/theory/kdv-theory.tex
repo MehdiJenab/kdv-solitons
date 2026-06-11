@@ -1,0 +1,126 @@
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{siunitx}
+
+\title{KdV Equation Theory}
+\author{}
+\date{}
+
+\begin{document}
+
+\section{The Korteweg-de Vries Equation}
+
+The KdV equation describes weakly nonlinear long waves in dispersive media:
+
+\begin{equation}
+u_t + 6uu_x + u_{xxx} = 0
+\end{equation}
+
+where:
+\begin{itemize}
+    \item $u(x,t)$ -- wave amplitude
+    \item $u_t = \frac{\partial u}{\partial t}$ -- temporal derivative
+    \item $u_x = \frac{\partial u}{\partial x}$ -- spatial derivative
+    \item $u_{xxx} = \frac{\partial^3 u}{\partial x^3}$ -- third spatial derivative
+\end{itemize}
+
+\section{Soliton Solutions}
+
+The KdV equation admits exact soliton solutions -- localized waves that maintain their shape.
+
+\subsection{Single Soliton}
+
+\begin{equation}
+u(x,t) = 2\kappa^2 \sech^2\left(\kappa(x - 4\kappa^2 t)\right)
+\end{equation}
+
+Parameters:
+\begin{itemize}
+    \item $\kappa$ -- soliton parameter (controls amplitude and width)
+    \item Amplitude: $A = 2\kappa^2$
+    \item Width: $w \sim 1/\kappa$
+    \item Speed: $c = 4\kappa^2$
+    \item Center: $x_c(t) = 4\kappa^2 t$
+\end{itemize}
+
+\subsection{Multi-Soliton Solutions}
+
+For $N$ solitons with parameters $\kappa_i$:
+
+\begin{equation}
+u(x,t) = 2 \frac{\partial^2}{\partial x^2} \ln \det\left(\delta_{ij} + \frac{2\kappa_i\kappa_j}{\kappa_i^2 + \kappa_j^2} e^{-(\kappa_i + \kappa_j)x + 4(\kappa_i^3 + \kappa_j^3)t}\right)
+\end{equation}
+
+\section{Pseudo-Spectral Method}
+
+\subsection{Discretization}
+
+Periodic domain $[0, L)$ with $N$ equally spaced points:
+
+\begin{align}
+x_j &= j \Delta x, \quad j = 0, 1, \dots, N-1 \\
+\Delta x &= \frac{L}{N}
+\end{align}
+
+\subsection{Fourier Representation}
+
+\begin{align}
+u_j(t) &= \frac{1}{N} \sum_{k=0}^{N-1} \hat{u}_k(t) e^{i k \theta_j} \\
+\theta_j &= \frac{2\pi j}{N}
+\end{align}
+
+\subsection{Derivatives in Fourier Space}
+
+\begin{align}
+\widehat{u_x}_k &= i k \hat{u}_k \\
+\widehat{u_{xxx}}_k &= (ik)^3 \hat{u}_k = -i k^3 \hat{u}_k
+\end{align}
+
+\section{Time Integration: ETD-RK4}
+
+Exponential Time Differencing with Runge-Kutta 4:
+
+\begin{align}
+\hat{u}_t &= A\hat{u} + N(u) \\
+\text{where } A\hat{u} &= -i k^3 \hat{u} \text{ (linear term)} \\
+N(u) &= -\mathcal{F}\{6uu_x\} \text{ (nonlinear term in Fourier space)}
+\end{align}
+
+ETD-RK4 steps:
+
+\begin{align}
+\hat{u}_1 &= e^{\frac{h}{2}A}\hat{u}_n + \frac{h}{2}e^{\frac{h}{2}A}N(u_n) \\
+\hat{u}_2 &= e^{\frac{h}{2}A}\hat{u}_n + \frac{h}{2}e^{\frac{h}{2}A}N(u_1) \\
+\hat{u}_3 &= e^{hA}\hat{u}_n + he^{hA}N(u_2) \\
+\hat{u}_{n+1} &= e^{hA}\hat{u}_n + \frac{h}{6}\left(e^{hA}N(u_0) + 2e^{\frac{h}{2}A}N(u_1) + 2e^{\frac{h}{2}A}N(u_2) + N(u_3)\right)
+\end{align}
+
+where $u_j = \mathcal{F}^{-1}\{\hat{u}_j\}$.
+
+\section{Error Analysis}
+
+\subsection{Truncation Error}
+- Spatial: Spectral (exponential for smooth solutions)
+- Temporal: $O(\Delta t^4)$ for RK4
+
+\subsection{Gibbs Phenomenon}
+Not applicable for periodic smooth solutions.
+
+\subsection{Aliasing}
+Use 2/3 rule for dealiasing nonlinear terms:
+\begin{equation}
+\hat{u}_k = 0 \text{ for } |k| > \frac{2N}{3}
+\end{equation}
+
+\section{Conservation Laws}
+
+KdV has infinitely many conserved quantities:
+
+\begin{align}
+\text{Mass: } &M = \int_0^L u \, dx \\
+\text{Momentum: } &P = \int_0^L u^2 \, dx \\
+\text{Energy: } &E = \int_0^L \left(u_x^2 - 2u^3\right) \, dx
+\end{align}
+
+\end{document}

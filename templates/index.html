@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KdV Soliton Propagation Simulator</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+        }
+        .controls {
+            background-color: #ecf0f1;
+            padding: 20px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .control-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: inline-block;
+            width: 150px;
+            font-weight: bold;
+        }
+        input[type="range"], input[type="number"] {
+            width: 200px;
+        }
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-right: 10px;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        button:disabled {
+            background-color: #bdc3c7;
+            cursor: not-allowed;
+        }
+        .step-btn {
+            padding: 2px 0;
+            width: 28px;
+            font-size: 12px;
+            line-height: 1;
+            margin: 0 0 0 4px;
+            border-radius: 3px;
+        }
+        #N-value, #L-value, #dt-value, #t_final-value {
+            display: inline-block;
+            min-width: 55px;
+            font-weight: bold;
+            text-align: right;
+        }
+        .soliton-section { margin-bottom: 20px; }
+        #add-soliton {
+            padding: 4px 12px;
+            font-size: 13px;
+            margin: 0;
+            background-color: #27ae60;
+        }
+        #add-soliton:hover { background-color: #1e8449; }
+        #solitons-list { margin-top: 10px; }
+        .soliton-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background-color: #fff;
+            border: 1px solid #d6dbdf;
+            border-radius: 4px;
+            padding: 6px 10px;
+            margin-bottom: 6px;
+            width: fit-content;
+        }
+        .soliton-row .tag {
+            font-weight: bold;
+            color: #2c3e50;
+            width: 70px;
+        }
+        .soliton-row label { width: auto; font-weight: normal; }
+        .soliton-row input[type="number"] { width: 80px; }
+        .soliton-row .remove-btn {
+            padding: 2px 8px;
+            font-size: 14px;
+            background-color: #e74c3c;
+            margin: 0;
+        }
+        .soliton-row .remove-btn:hover { background-color: #c0392b; }
+        .soliton-row .derived {
+            color: #7f8c8d;
+            font-size: 12px;
+        }
+        .chart-container {
+            position: relative;
+            height: 400px;
+            margin-top: 20px;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .status.running {
+            background-color: #d5f4e6;
+            color: #27ae60;
+        }
+        .status.stopped {
+            background-color: #fadbd8;
+            color: #c0392b;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>KdV Soliton Propagation Simulator</h1>
+
+        <div class="controls">
+            <div class="control-group soliton-section" id="soliton-controls">
+                <label>Solitons:</label>
+                <button type="button" id="add-soliton">+ Add soliton</button>
+                <div id="solitons-list"></div>
+            </div>
+
+            <div class="control-group soliton-section" id="gaussian-controls">
+                <label>Gaussian packets:</label>
+                <button type="button" id="add-gaussian">+ Add Gaussian</button>
+                <div id="gaussians-list"></div>
+            </div>
+
+            <div class="control-group">
+                <label for="N">Grid Points:</label>
+                <input type="range" id="N" min="64" max="512" step="64" value="256">
+                <span id="N-value">256</span>
+                <button type="button" class="step-btn" data-target="N" data-dir="-1">−</button>
+                <button type="button" class="step-btn" data-target="N" data-dir="1">+</button>
+            </div>
+
+            <div class="control-group">
+                <label for="L">Domain Length:</label>
+                <input type="range" id="L" min="50" max="200" step="10" value="100">
+                <span id="L-value">100</span>
+                <button type="button" class="step-btn" data-target="L" data-dir="-1">−</button>
+                <button type="button" class="step-btn" data-target="L" data-dir="1">+</button>
+            </div>
+
+            <div class="control-group">
+                <label for="dt">Time Step:</label>
+                <input type="range" id="dt" min="0.0001" max="0.01" step="0.0001" value="0.001">
+                <span id="dt-value">0.001</span>
+                <button type="button" class="step-btn" data-target="dt" data-dir="-1">−</button>
+                <button type="button" class="step-btn" data-target="dt" data-dir="1">+</button>
+            </div>
+
+            <div class="control-group">
+                <label for="t_final">Final Time:</label>
+                <input type="range" id="t_final" min="0.1" max="5.0" step="0.1" value="1.0">
+                <span id="t_final-value">1.0</span>
+                <button type="button" class="step-btn" data-target="t_final" data-dir="-1">−</button>
+                <button type="button" class="step-btn" data-target="t_final" data-dir="1">+</button>
+            </div>
+
+            <button id="run-btn">Run Simulation</button>
+            <button id="reset-btn" disabled>Reset</button>
+        </div>
+
+        <div id="status" class="status stopped">
+            Ready to run simulation
+        </div>
+
+        <div class="chart-container">
+            <canvas id="solitonChart"></canvas>
+        </div>
+    </div>
+
+    <script>
+        // Chart setup
+        const ctx = document.getElementById('solitonChart').getContext('2d');
+        let solitonChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Soliton Profile',
+                    data: [],
+                    borderColor: 'rgb(75, 192, 192)',
+                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                    borderWidth: 2,
+                    tension: 0.4,
+                    pointRadius: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Position (x)'
+                        },
+                        ticks: {
+                            maxTicksLimit: 11,
+                            maxRotation: 0,
+                            autoSkip: true,
+                            callback: function (value) {
+                                // value is the category index; round its label
+                                return Math.round(Number(this.getLabelForValue(value)));
+                            }
+                        }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'Amplitude (u)'
+                        }
+                    }
+                }
+            }
+        });
+
+        // Update parameter displays for the global (non-soliton) controls
+        function updateParamDisplays() {
+            document.getElementById('N-value').textContent = document.getElementById('N').value;
+            document.getElementById('L-value').textContent = document.getElementById('L').value;
+            document.getElementById('dt-value').textContent = document.getElementById('dt').value;
+            document.getElementById('t_final-value').textContent = document.getElementById('t_final').value;
+        }
+
+        function domainLength() {
+            return parseFloat(document.getElementById('L').value);
+        }
+
+        // Handle to the running animation interval (null when idle)
+        let animationTimer = null;
+
+        // --- Soliton list state ---------------------------------------------
+        // Each soliton is {kappa, x0}. Amplitude = 2*kappa^2, speed = 4*kappa^2.
+        let solitons = [];
+
+        function makeSolitonRow(s) {
+            const row = document.createElement('div');
+            row.className = 'soliton-row';
+            row.innerHTML = `
+                <span class="tag"></span>
+                <label>κ</label>
+                <input type="number" class="sol-kappa" min="0.1" max="2.0" step="0.1">
+                <label>position</label>
+                <input type="number" class="sol-x0" min="0" step="1">
+                <span class="derived"></span>
+                <button type="button" class="remove-btn" title="Remove soliton">×</button>
+            `;
+            const kappaInp = row.querySelector('.sol-kappa');
+            const x0Inp = row.querySelector('.sol-x0');
+            const derived = row.querySelector('.derived');
+            kappaInp.value = s.kappa;
+            x0Inp.value = s.x0;
+            x0Inp.max = domainLength();
+
+            function refreshDerived() {
+                const amp = 2 * s.kappa * s.kappa;
+                const speed = 4 * s.kappa * s.kappa;
+                derived.textContent = `amp ${amp.toFixed(2)}, speed ${speed.toFixed(2)}`;
+            }
+            refreshDerived();
+
+            kappaInp.addEventListener('input', () => {
+                s.kappa = parseFloat(kappaInp.value) || 0.1;
+                refreshDerived();
+                updateFinalTimeForLap();
+            });
+            x0Inp.addEventListener('input', () => {
+                s.x0 = parseFloat(x0Inp.value) || 0;
+                previewInitialCondition();
+            });
+            row.querySelector('.remove-btn').addEventListener('click', () => {
+                if (solitons.length + gaussians.length <= 1) return;  // keep one component
+                solitons.splice(solitons.indexOf(s), 1);
+                renderSolitons();
+                updateFinalTimeForLap();
+            });
+            return row;
+        }
+
+        function renderSolitons() {
+            const list = document.getElementById('solitons-list');
+            list.innerHTML = '';
+            solitons.forEach((s, idx) => {
+                const row = makeSolitonRow(s);
+                row.querySelector('.tag').textContent = 'Soliton ' + (idx + 1);
+                list.appendChild(row);
+            });
+        }
+
+        // --- Gaussian packet list state -------------------------------------
+        // Each Gaussian is {amplitude, x0, width}. It is not a KdV eigenstate,
+        // so it disperses into a soliton train plus an oscillatory tail.
+        let gaussians = [];
+
+        function makeGaussianRow(g) {
+            const row = document.createElement('div');
+            row.className = 'soliton-row';
+            row.innerHTML = `
+                <span class="tag"></span>
+                <label>amplitude</label>
+                <input type="number" class="g-amp" min="0.1" max="3.0" step="0.1">
+                <label>center</label>
+                <input type="number" class="g-x0" min="0" step="1">
+                <label>width (σ)</label>
+                <input type="number" class="g-width" min="0.5" step="0.5">
+                <button type="button" class="remove-btn" title="Remove Gaussian">×</button>
+            `;
+            const ampInp = row.querySelector('.g-amp');
+            const x0Inp = row.querySelector('.g-x0');
+            const widthInp = row.querySelector('.g-width');
+            ampInp.value = g.amplitude;
+            x0Inp.value = g.x0;
+            x0Inp.max = domainLength();
+            widthInp.value = g.width;
+
+            ampInp.addEventListener('input', () => {
+                g.amplitude = parseFloat(ampInp.value) || 0.1;
+                updateFinalTimeForLap();
+            });
+            x0Inp.addEventListener('input', () => {
+                g.x0 = parseFloat(x0Inp.value) || 0;
+                previewInitialCondition();
+            });
+            widthInp.addEventListener('input', () => {
+                g.width = parseFloat(widthInp.value) || 0.5;
+                previewInitialCondition();
+            });
+            row.querySelector('.remove-btn').addEventListener('click', () => {
+                if (solitons.length + gaussians.length <= 1) return;  // keep one component
+                gaussians.splice(gaussians.indexOf(g), 1);
+                renderGaussians();
+                updateFinalTimeForLap();
+            });
+            return row;
+        }
+
+        function renderGaussians() {
+            const list = document.getElementById('gaussians-list');
+            list.innerHTML = '';
+            gaussians.forEach((g, idx) => {
+                const row = makeGaussianRow(g);
+                row.querySelector('.tag').textContent = 'Gaussian ' + (idx + 1);
+                list.appendChild(row);
+            });
+        }
+
+        // A characteristic timescale for one lap of the periodic domain, T = L/c,
+        // using the SLOWEST component so everything completes at least one lap.
+        // Soliton speed is 4*kappa^2; a Gaussian of height A behaves like a
+        // soliton of that height, c ~ 2A. t_final stays editable afterwards.
+        function referencePeriod() {
+            const L = domainLength();
+            const speeds = solitons.map(s => 4 * s.kappa * s.kappa)
+                .concat(gaussians.map(g => 2 * g.amplitude));
+            const cMin = speeds.length ? Math.min(...speeds) : 1;
+            return L / cMin;
+        }
+
+        function updateFinalTimeForLap() {
+            const period = referencePeriod();
+            const tFinal = document.getElementById('t_final');
+            tFinal.min = 0.1;
+            tFinal.max = (2 * period).toFixed(2);   // allow up to two laps
+            tFinal.step = (period / 100).toFixed(4);
+            tFinal.value = period.toFixed(2);
+            updateParamDisplays();
+            previewInitialCondition();
+        }
+
+        // --- Live preview of the initial condition (t = 0) ------------------
+        // Computed in the browser with the same formulas as the solver so the
+        // user can see the setup before running the simulation.
+        function periodicDistance(x, center, L) {
+            let d = (x - center + L / 2) % L;
+            if (d < 0) d += L;
+            return d - L / 2;
+        }
+
+        function initialField(gridPoints, L) {
+            return gridPoints.map(x => {
+                let u = 0;
+                for (const s of solitons) {
+                    const d = periodicDistance(x, s.x0, L);
+                    u += 2 * s.kappa * s.kappa / Math.cosh(s.kappa * d) ** 2;
+                }
+                for (const g of gaussians) {
+                    const d = periodicDistance(x, g.x0, L);
+                    u += g.amplitude * Math.exp(-(d * d) / (2 * g.width * g.width));
+                }
+                return u;
+            });
+        }
+
+        function previewInitialCondition() {
+            // Don't disturb a running animation
+            if (animationTimer) return;
+            const N = parseInt(document.getElementById('N').value);
+            const L = domainLength();
+            const gridPoints = Array.from({length: N}, (_, i) => i * L / N);
+            const field = initialField(gridPoints, L);
+
+            solitonChart.options.animation = false;
+            solitonChart.data.labels = gridPoints;
+            solitonChart.data.datasets[0].data = field;
+            solitonChart.data.datasets[0].label = 'Initial condition (t = 0)';
+
+            let mx = 0, mn = 0;
+            for (const v of field) { if (v > mx) mx = v; if (v < mn) mn = v; }
+            const pad = 0.1 * (mx - mn || 1);
+            solitonChart.options.scales.y.min = mn - pad;
+            solitonChart.options.scales.y.max = mx + pad;
+            solitonChart.update();
+
+            document.getElementById('status').className = 'status stopped';
+            document.getElementById('status').textContent =
+                'Preview: initial condition at t = 0 — press Run Simulation to evolve it.';
+        }
+
+        // Initialize with a single centered soliton and no Gaussians
+        solitons = [{ kappa: 0.5, x0: domainLength() / 2 }];
+        gaussians = [];
+        renderSolitons();
+        renderGaussians();
+        updateFinalTimeForLap();
+        updateParamDisplays();
+
+        // Add event listeners to sliders
+        document.querySelectorAll('input[type="range"]').forEach(input => {
+            input.addEventListener('input', updateParamDisplays);
+        });
+
+        // Grid resolution changes the sampling of the preview
+        document.getElementById('N').addEventListener('input', previewInitialCondition);
+
+        // Changing L rescales positions/lap time for all components
+        document.getElementById('L').addEventListener('input', () => {
+            const L = domainLength();
+            solitons.forEach(s => { if (s.x0 > L) s.x0 = L; });
+            gaussians.forEach(g => { if (g.x0 > L) g.x0 = L; });
+            renderSolitons();
+            renderGaussians();
+            updateFinalTimeForLap();
+        });
+
+        // Add a soliton (placed away from the others so they interact)
+        document.getElementById('add-soliton').addEventListener('click', () => {
+            const L = domainLength();
+            const x0 = Math.round(L * (solitons.length) / (solitons.length + 1));
+            solitons.push({ kappa: 0.8, x0: x0 });
+            renderSolitons();
+            updateFinalTimeForLap();
+        });
+
+        // Add a Gaussian packet
+        document.getElementById('add-gaussian').addEventListener('click', () => {
+            const L = domainLength();
+            gaussians.push({ amplitude: 1.0, x0: Math.round(L / 3), width: 3.0 });
+            renderGaussians();
+            updateFinalTimeForLap();
+        });
+
+        // Stepper +/- buttons: nudge a slider by one step, clamped to its range
+        function decimalsOf(step) {
+            const s = String(step);
+            const dot = s.indexOf('.');
+            return dot < 0 ? 0 : s.length - dot - 1;
+        }
+        document.querySelectorAll('.step-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const input = document.getElementById(btn.dataset.target);
+                const step = parseFloat(input.step) || 1;
+                const dir = parseInt(btn.dataset.dir, 10);
+                const min = parseFloat(input.min);
+                const max = parseFloat(input.max);
+                let value = parseFloat(input.value) + dir * step;
+                value = Math.min(max, Math.max(min, value));
+                input.value = value.toFixed(decimalsOf(input.step));
+                input.dispatchEvent(new Event('input'));
+            });
+        });
+
+        // Run simulation button
+        document.getElementById('run-btn').addEventListener('click', async function() {
+            const params = {
+                N: parseInt(document.getElementById('N').value),
+                L: parseFloat(document.getElementById('L').value),
+                dt: parseFloat(document.getElementById('dt').value),
+                t_final: parseFloat(document.getElementById('t_final').value),
+                solitons: solitons.map(s => ({ kappa: s.kappa, x0: s.x0 })),
+                gaussians: gaussians.map(g => ({
+                    amplitude: g.amplitude, x0: g.x0, width: g.width
+                }))
+            };
+
+            // Disable buttons during simulation
+            this.disabled = true;
+            document.getElementById('reset-btn').disabled = true;
+            document.getElementById('status').className = 'status running';
+            document.getElementById('status').textContent = 'Running simulation...';
+
+            try {
+                const response = await fetch('/api/simulate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(params)
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || `HTTP error! status: ${response.status}`);
+                }
+
+                // Update chart using the data returned by /api/simulate
+                updateChart(data);
+
+            } catch (error) {
+                console.error('Error running simulation:', error);
+                document.getElementById('status').className = 'status stopped';
+                document.getElementById('status').textContent = 'Error: ' + error.message;
+            } finally {
+                this.disabled = false;
+                document.getElementById('reset-btn').disabled = false;
+            }
+        });
+
+        // Reset button
+        document.getElementById('reset-btn').addEventListener('click', function() {
+            if (animationTimer) {
+                clearInterval(animationTimer);
+                animationTimer = null;
+            }
+            // Restore the initial-condition preview after a reset
+            previewInitialCondition();
+        });
+
+        // Animate the chart through the time-evolved snapshots
+        function updateChart(data) {
+            try {
+                if (data.solutions && data.solutions.length > 0) {
+                    // Stop any animation still in flight from a previous run
+                    if (animationTimer) {
+                        clearInterval(animationTimer);
+                        animationTimer = null;
+                    }
+
+                    const solutions = data.solutions;
+                    const times = data.times;
+
+                    // Get grid points for x-axis
+                    const gridPoints = Array.from({length: data.params.N}, (_, i) =>
+                        i * data.params.L / data.params.N
+                    );
+
+                    solitonChart.data.labels = gridPoints;
+                    // Disable per-frame animation so playback stays smooth
+                    solitonChart.options.animation = false;
+
+                    // Pin the y-axis to the tallest soliton (global max over all
+                    // frames) so it doesn't jump around as the animation plays.
+                    let globalMax = 0;
+                    let globalMin = 0;
+                    for (const frameData of solutions) {
+                        for (const v of frameData) {
+                            if (v > globalMax) globalMax = v;
+                            if (v < globalMin) globalMin = v;
+                        }
+                    }
+                    const pad = 0.1 * (globalMax - globalMin || 1);
+                    solitonChart.options.scales.y.min = globalMin - pad;
+                    solitonChart.options.scales.y.max = globalMax + pad;
+
+                    let frame = 0;
+                    const renderFrame = () => {
+                        solitonChart.data.datasets[0].data = solutions[frame];
+                        solitonChart.data.datasets[0].label =
+                            `Soliton Profile (t = ${times[frame].toFixed(3)})`;
+                        solitonChart.update();
+                        document.getElementById('status').textContent =
+                            `Playing frame ${frame + 1} / ${solutions.length} (t = ${times[frame].toFixed(3)})`;
+                    };
+
+                    // Show the first frame immediately, then advance over time
+                    renderFrame();
+                    if (solutions.length > 1) {
+                        animationTimer = setInterval(() => {
+                            frame++;
+                            if (frame >= solutions.length) {
+                                clearInterval(animationTimer);
+                                animationTimer = null;
+                                document.getElementById('status').className = 'status stopped';
+                                document.getElementById('status').textContent =
+                                    `Simulation complete (${solutions.length} frames, t: ${times[0].toFixed(2)} → ${times[times.length - 1].toFixed(2)})`;
+                                return;
+                            }
+                            renderFrame();
+                        }, 80);
+                    } else {
+                        document.getElementById('status').className = 'status stopped';
+                        document.getElementById('status').textContent = 'Simulation complete';
+                    }
+                }
+            } catch (error) {
+                console.error('Error updating chart:', error);
+                document.getElementById('status').className = 'status stopped';
+                document.getElementById('status').textContent = 'Error updating chart: ' + error.message;
+            }
+        }
+
+    </script>
+</body>
+</html>
