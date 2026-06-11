@@ -96,6 +96,36 @@ def gaussian_packet(
     return amplitude * np.exp(-(x_shifted**2) / (2 * width**2))
 
 
+def conserved_quantities(
+    problem: "KdVProblem", u: np.ndarray
+) -> tuple[float, float, float]:
+    """
+    Evaluate the first three KdV invariants of the field ``u``.
+
+    For ``u_t + 6 u u_x + u_xxx = 0`` these are conserved by the exact dynamics:
+
+    - mass     ``= integral u dx``
+    - momentum ``= integral u^2 dx``
+    - energy   ``= integral (2 u^3 - u_x^2) dx``
+
+    Tracking them over a run both demonstrates KdV's integrability and serves
+    as an accuracy diagnostic (a well-resolved spectral run keeps them flat).
+
+    Args:
+        problem: KdV problem (provides the grid and the spectral derivative)
+        u: Field on the grid
+
+    Returns:
+        ``(mass, momentum, energy)``
+    """
+    dx = problem.grid.dx
+    u_x = problem.compute_u_x(u)
+    mass = float(dx * np.sum(u))
+    momentum = float(dx * np.sum(u**2))
+    energy = float(dx * np.sum(2 * u**3 - u_x**2))
+    return mass, momentum, energy
+
+
 def cosine_wave(grid: "Grid", amplitude: float, mode: int = 1) -> np.ndarray:
     """
     Build a cosine initial condition: ``A * cos(2*pi*mode*x / L)``.

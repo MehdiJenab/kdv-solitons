@@ -11,6 +11,7 @@ from kdv_solver.solver import (
     Grid,
     KdVProblem,
     PseudoSpectralSolver,
+    conserved_quantities,
     cosine_wave,
     gaussian_packet,
     multi_soliton_field,
@@ -130,3 +131,29 @@ class TestSolitonProfiles:
         assert u.max() == pytest.approx(0.9, rel=1e-3)
         assert u.mean() == pytest.approx(0.0, abs=1e-12)  # zero-mean
         assert u[0] == pytest.approx(0.9)  # cosine peaks at x=0 for mode 1
+
+
+class TestConservedQuantities:
+    """The first three KdV invariants."""
+
+    def test_single_soliton_values(self) -> None:
+        # For a single soliton: mass = integral 2k^2 sech^2(k x) dx = 4*kappa.
+        grid = Grid(512, 100.0)
+        problem = KdVProblem(grid, kappa=0.5)
+        mass, momentum, energy = conserved_quantities(
+            problem, problem.initial_condition()
+        )
+        assert mass == pytest.approx(4 * 0.5, rel=1e-4)
+        assert momentum > 0  # integral u^2
+
+    def test_invariants_are_conserved(self) -> None:
+        grid = Grid(512, 50.0)
+        problem = KdVProblem(grid, kappa=1.0)
+        solver = PseudoSpectralSolver(problem, dt=2e-3)
+        u0 = multi_soliton_field(grid, [(1.0, 15.0), (0.6, 30.0)])
+        _, solutions = solver.solve_with_history(8.0, n_snapshots=20, u0=u0)
+
+        first = conserved_quantities(problem, solutions[0])
+        last = conserved_quantities(problem, solutions[-1])
+        for i0, i1 in zip(first, last):
+            assert i1 == pytest.approx(i0, rel=1e-4, abs=1e-6)

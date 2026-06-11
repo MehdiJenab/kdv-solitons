@@ -123,6 +123,38 @@
             height: 400px;
             margin-top: 20px;
         }
+        .chart-container.small { height: 220px; }
+        .playback {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 12px;
+            flex-wrap: wrap;
+        }
+        .playback button {
+            padding: 6px 12px;
+            font-size: 13px;
+            margin: 0;
+        }
+        .playback #scrub { flex: 1; min-width: 160px; }
+        .playback select { padding: 4px; }
+        #export-csv, #export-png, #share-btn { background-color: #7f8c8d; }
+        #export-csv:hover, #export-png:hover, #share-btn:hover { background-color: #616a6b; }
+        .section-title { color: #2c3e50; margin: 24px 0 6px; font-size: 16px; }
+        .heatmap-wrap { width: 100%; }
+        #heatmapCanvas {
+            width: 100%;
+            height: 280px;
+            border: 1px solid #d6dbdf;
+            border-radius: 4px;
+        }
+        .heatmap-axis {
+            display: flex;
+            justify-content: space-between;
+            color: #7f8c8d;
+            font-size: 12px;
+            margin-top: 2px;
+        }
         .status {
             padding: 10px;
             border-radius: 5px;
@@ -211,6 +243,37 @@
         <div class="chart-container">
             <canvas id="solitonChart"></canvas>
         </div>
+
+        <div class="playback" id="playback" style="display:none">
+            <button type="button" id="play-btn">⏸ Pause</button>
+            <input type="range" id="scrub" min="0" max="0" value="0" step="1">
+            <span id="frame-label" class="derived">t = 0.00</span>
+            <label for="speed">speed</label>
+            <select id="speed">
+                <option value="160">0.5×</option>
+                <option value="80" selected>1×</option>
+                <option value="40">2×</option>
+                <option value="16">5×</option>
+            </select>
+            <button type="button" id="export-csv">⬇ CSV</button>
+            <button type="button" id="export-png">⬇ PNG</button>
+            <button type="button" id="share-btn">🔗 Share</button>
+        </div>
+
+        <div id="extra-views" style="display:none">
+            <h3 class="section-title">Space–time diagram — u(x, t)</h3>
+            <div class="heatmap-wrap">
+                <canvas id="heatmapCanvas" width="900" height="280"></canvas>
+                <div class="heatmap-axis">
+                    <span>t = 0</span><span id="heatmap-tmax">t</span>
+                </div>
+            </div>
+
+            <h3 class="section-title">Conserved quantities — drift from t = 0 (should stay ≈ 0)</h3>
+            <div class="chart-container small">
+                <canvas id="invariantsChart"></canvas>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -255,6 +318,42 @@
                             text: 'Amplitude (u)'
                         }
                     }
+                }
+            }
+        });
+
+        // Conserved-quantities chart (drift of each invariant from t = 0)
+        const invCtx = document.getElementById('invariantsChart').getContext('2d');
+        const invColors = ['#2980b9', '#27ae60', '#c0392b'];
+        let invariantsChart = new Chart(invCtx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: ['mass', 'momentum', 'energy'].map((name, i) => ({
+                    label: name,
+                    data: [],
+                    borderColor: invColors[i],
+                    backgroundColor: invColors[i],
+                    borderWidth: 2,
+                    tension: 0.2,
+                    pointRadius: 0
+                }))
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        title: { display: true, text: 'Time (t)' },
+                        ticks: {
+                            maxTicksLimit: 11,
+                            maxRotation: 0,
+                            callback: function (value) {
+                                return Number(this.getLabelForValue(value)).toFixed(1);
+                            }
+                        }
+                    },
+                    y: { title: { display: true, text: 'I(t) − I(0)' } }
                 }
             }
         });
@@ -517,15 +616,17 @@
                 'Preview: initial condition at t = 0 — press Run Simulation to evolve it.';
         }
 
-        // Initialize with a single centered soliton and no other components
-        solitons = [{ kappa: 0.5, x0: domainLength() / 2 }];
-        gaussians = [];
-        cosines = [];
-        renderSolitons();
-        renderGaussians();
-        renderCosines();
-        updateFinalTimeForLap();
-        updateParamDisplays();
+        // Initialize from a shared link if present, else a single centered soliton
+        if (!loadConfigFromHash()) {
+            solitons = [{ kappa: 0.5, x0: domainLength() / 2 }];
+            gaussians = [];
+            cosines = [];
+            renderSolitons();
+            renderGaussians();
+            renderCosines();
+            updateFinalTimeForLap();
+            updateParamDisplays();
+        }
 
         // Add event listeners to sliders
         document.querySelectorAll('input[type="range"]').forEach(input => {
@@ -679,84 +780,222 @@
 
         // Reset button
         document.getElementById('reset-btn').addEventListener('click', function() {
-            if (animationTimer) {
-                clearInterval(animationTimer);
-                animationTimer = null;
-            }
-            // Restore the initial-condition preview after a reset
+            stopPlayback();
+            lastRun = null;
+            document.getElementById('playback').style.display = 'none';
+            document.getElementById('extra-views').style.display = 'none';
             previewInitialCondition();
         });
 
-        // Animate the chart through the time-evolved snapshots
+        // --- Playback state -------------------------------------------------
+        let lastRun = null;     // {times, solutions, params, invariants, gridPoints}
+        let currentFrame = 0;
+        let playing = false;
+
+        function setPlayButton() {
+            document.getElementById('play-btn').textContent = playing ? '⏸ Pause' : '▶ Play';
+        }
+
+        function stopPlayback() {
+            if (animationTimer) { clearInterval(animationTimer); animationTimer = null; }
+            playing = false;
+            setPlayButton();
+        }
+
+        function startPlayback() {
+            if (!lastRun || lastRun.times.length < 2) return;
+            if (animationTimer) clearInterval(animationTimer);
+            playing = true;
+            setPlayButton();
+            const delay = parseInt(document.getElementById('speed').value, 10);
+            animationTimer = setInterval(() => {
+                if (currentFrame + 1 >= lastRun.times.length) { stopPlayback(); return; }
+                renderFrame(currentFrame + 1);
+            }, delay);
+        }
+
+        function renderFrame(i) {
+            if (!lastRun) return;
+            currentFrame = i;
+            solitonChart.data.datasets[0].data = lastRun.solutions[i];
+            solitonChart.data.datasets[0].label = `u(x) at t = ${lastRun.times[i].toFixed(3)}`;
+            solitonChart.update();
+            document.getElementById('scrub').value = i;
+            document.getElementById('frame-label').textContent =
+                `t = ${lastRun.times[i].toFixed(3)}  (frame ${i + 1}/${lastRun.times.length})`;
+        }
+
+        document.getElementById('play-btn').addEventListener('click', () => {
+            if (playing) { stopPlayback(); return; }
+            if (currentFrame >= lastRun.times.length - 1) currentFrame = 0;  // replay
+            startPlayback();
+        });
+        document.getElementById('scrub').addEventListener('input', (e) => {
+            stopPlayback();
+            renderFrame(parseInt(e.target.value, 10));
+        });
+        document.getElementById('speed').addEventListener('change', () => {
+            if (playing) startPlayback();
+        });
+
+        // --- Space-time (x, t) heatmap --------------------------------------
+        function jetColor(t) {
+            t = Math.max(0, Math.min(1, t));
+            const r = Math.round(255 * Math.max(0, Math.min(1, 1.5 - Math.abs(4 * t - 3))));
+            const g = Math.round(255 * Math.max(0, Math.min(1, 1.5 - Math.abs(4 * t - 2))));
+            const b = Math.round(255 * Math.max(0, Math.min(1, 1.5 - Math.abs(4 * t - 1))));
+            return [r, g, b];
+        }
+
+        function drawHeatmap(run) {
+            const canvas = document.getElementById('heatmapCanvas');
+            const cols = run.solutions[0].length;   // position (x)
+            const rows = run.times.length;           // time (t), top = t0
+            canvas.width = cols;
+            canvas.height = rows;
+            const hctx = canvas.getContext('2d');
+            const img = hctx.createImageData(cols, rows);
+            let mn = Infinity, mx = -Infinity;
+            for (const f of run.solutions) for (const v of f) { if (v < mn) mn = v; if (v > mx) mx = v; }
+            const span = (mx - mn) || 1;
+            for (let r = 0; r < rows; r++) {
+                const frame = run.solutions[r];
+                for (let c = 0; c < cols; c++) {
+                    const [R, G, B] = jetColor((frame[c] - mn) / span);
+                    const idx = (r * cols + c) * 4;
+                    img.data[idx] = R; img.data[idx + 1] = G; img.data[idx + 2] = B; img.data[idx + 3] = 255;
+                }
+            }
+            hctx.putImageData(img, 0, 0);
+            document.getElementById('heatmap-tmax').textContent =
+                't = ' + run.times[rows - 1].toFixed(2);
+        }
+
+        // --- Conserved-quantities drift chart -------------------------------
+        function drawInvariants(run) {
+            if (!run.invariants) return;
+            invariantsChart.data.labels = run.times;
+            ['mass', 'momentum', 'energy'].forEach((k, i) => {
+                const arr = run.invariants[k];
+                const base = arr[0];
+                invariantsChart.data.datasets[i].data = arr.map(v => v - base);
+            });
+            invariantsChart.update();
+        }
+
+        // --- Export & share -------------------------------------------------
+        function downloadBlob(content, filename, type) {
+            const blob = new Blob([content], { type });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = filename; a.click();
+            URL.revokeObjectURL(url);
+        }
+        document.getElementById('export-csv').addEventListener('click', () => {
+            if (!lastRun) return;
+            const { times, solutions, gridPoints } = lastRun;
+            let csv = 'x\\time,' + times.map(t => t.toFixed(5)).join(',') + '\n';
+            for (let xi = 0; xi < gridPoints.length; xi++) {
+                const row = [gridPoints[xi].toFixed(5)];
+                for (let f = 0; f < times.length; f++) row.push(solutions[f][xi].toFixed(6));
+                csv += row.join(',') + '\n';
+            }
+            downloadBlob(csv, 'kdv_run.csv', 'text/csv');
+        });
+        document.getElementById('export-png').addEventListener('click', () => {
+            const a = document.createElement('a');
+            a.href = solitonChart.toBase64Image();
+            a.download = 'kdv_frame.png';
+            a.click();
+        });
+        function currentConfig() {
+            return {
+                N: parseInt(document.getElementById('N').value),
+                L: domainLength(),
+                dt: parseFloat(document.getElementById('dt').value),
+                t_final: parseFloat(document.getElementById('t_final').value),
+                solitons, gaussians, cosines
+            };
+        }
+        document.getElementById('share-btn').addEventListener('click', () => {
+            const url = location.origin + location.pathname +
+                '#cfg=' + btoa(JSON.stringify(currentConfig()));
+            const done = () => {
+                document.getElementById('status').className = 'status stopped';
+                document.getElementById('status').textContent = 'Shareable link copied to clipboard.';
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(url).then(done, () => prompt('Copy this link:', url));
+            } else {
+                prompt('Copy this link:', url);
+            }
+        });
+        function loadConfigFromHash() {
+            const m = location.hash.match(/cfg=([^&]+)/);
+            if (!m) return false;
+            try {
+                const cfg = JSON.parse(atob(m[1]));
+                document.getElementById('N').value = cfg.N || 256;
+                document.getElementById('L').value = cfg.L || 100;
+                document.getElementById('dt').value = cfg.dt || 0.001;
+                solitons = cfg.solitons || [];
+                gaussians = cfg.gaussians || [];
+                cosines = cfg.cosines || [];
+                if (componentCount() === 0) solitons = [{ kappa: 0.5, x0: domainLength() / 2 }];
+                renderSolitons(); renderGaussians(); renderCosines();
+                const tf = document.getElementById('t_final');
+                if (cfg.t_final) { tf.min = 0.1; tf.max = Math.max(40, 2 * cfg.t_final); tf.value = cfg.t_final; }
+                updateParamDisplays();
+                previewInitialCondition();
+                return true;
+            } catch (e) {
+                return false;
+            }
+        }
+
+        // Show a completed run: load data, build all views, start playback
         function updateChart(data) {
             try {
-                if (data.solutions && data.solutions.length > 0) {
-                    // Stop any animation still in flight from a previous run
-                    if (animationTimer) {
-                        clearInterval(animationTimer);
-                        animationTimer = null;
-                    }
+                if (!data.solutions || data.solutions.length === 0) return;
+                stopPlayback();
 
-                    const solutions = data.solutions;
-                    const times = data.times;
-                    const ar = data.auto_resolution;
-                    const arNote = ar
-                        ? ` — auto-resolved at N=${ar.N}, dt=${ar.dt.toExponential(1)}`
-                        : '';
+                const solutions = data.solutions;
+                const times = data.times;
+                const gridPoints = Array.from({length: data.params.N}, (_, i) =>
+                    i * data.params.L / data.params.N
+                );
 
-                    // Get grid points for x-axis
-                    const gridPoints = Array.from({length: data.params.N}, (_, i) =>
-                        i * data.params.L / data.params.N
-                    );
+                // Pin the y-axis to the global range so it doesn't jump per frame.
+                let yMax = 0, yMin = 0;
+                for (const f of solutions) for (const v of f) { if (v > yMax) yMax = v; if (v < yMin) yMin = v; }
+                const pad = 0.1 * (yMax - yMin || 1);
+                solitonChart.options.animation = false;
+                solitonChart.options.scales.y.min = yMin - pad;
+                solitonChart.options.scales.y.max = yMax + pad;
+                solitonChart.data.labels = gridPoints;
 
-                    solitonChart.data.labels = gridPoints;
-                    // Disable per-frame animation so playback stays smooth
-                    solitonChart.options.animation = false;
+                lastRun = { times, solutions, gridPoints, invariants: data.invariants };
+                currentFrame = 0;
 
-                    // Pin the y-axis to the tallest soliton (global max over all
-                    // frames) so it doesn't jump around as the animation plays.
-                    let globalMax = 0;
-                    let globalMin = 0;
-                    for (const frameData of solutions) {
-                        for (const v of frameData) {
-                            if (v > globalMax) globalMax = v;
-                            if (v < globalMin) globalMin = v;
-                        }
-                    }
-                    const pad = 0.1 * (globalMax - globalMin || 1);
-                    solitonChart.options.scales.y.min = globalMin - pad;
-                    solitonChart.options.scales.y.max = globalMax + pad;
+                const scrub = document.getElementById('scrub');
+                scrub.max = times.length - 1;
+                scrub.value = 0;
+                document.getElementById('playback').style.display = 'flex';
+                document.getElementById('extra-views').style.display = 'block';
 
-                    let frame = 0;
-                    const renderFrame = () => {
-                        solitonChart.data.datasets[0].data = solutions[frame];
-                        solitonChart.data.datasets[0].label =
-                            `Soliton Profile (t = ${times[frame].toFixed(3)})`;
-                        solitonChart.update();
-                        document.getElementById('status').textContent =
-                            `Playing frame ${frame + 1} / ${solutions.length} (t = ${times[frame].toFixed(3)})`;
-                    };
+                drawHeatmap(lastRun);
+                drawInvariants(lastRun);
 
-                    // Show the first frame immediately, then advance over time
-                    renderFrame();
-                    if (solutions.length > 1) {
-                        animationTimer = setInterval(() => {
-                            frame++;
-                            if (frame >= solutions.length) {
-                                clearInterval(animationTimer);
-                                animationTimer = null;
-                                document.getElementById('status').className = 'status stopped';
-                                document.getElementById('status').textContent =
-                                    `Simulation complete (${solutions.length} frames, t: ${times[0].toFixed(2)} → ${times[times.length - 1].toFixed(2)})${arNote}`;
-                                return;
-                            }
-                            renderFrame();
-                        }, 80);
-                    } else {
-                        document.getElementById('status').className = 'status stopped';
-                        document.getElementById('status').textContent = 'Simulation complete';
-                    }
-                }
+                const ar = data.auto_resolution;
+                const arNote = ar
+                    ? ` — auto-resolved at N=${ar.N}, dt=${ar.dt.toExponential(1)}`
+                    : '';
+                document.getElementById('status').className = 'status stopped';
+                document.getElementById('status').textContent =
+                    `Simulation complete: ${times.length} frames, t ${times[0].toFixed(2)} → ${times[times.length - 1].toFixed(2)}${arNote}`;
+
+                renderFrame(0);
+                startPlayback();
             } catch (error) {
                 console.error('Error updating chart:', error);
                 document.getElementById('status').className = 'status stopped';

@@ -1,5 +1,7 @@
 # soliton-lab
 
+[![CI](https://github.com/MehdiJenab/kdv-solitons/actions/workflows/ci.yml/badge.svg)](https://github.com/MehdiJenab/kdv-solitons/actions/workflows/ci.yml)
+
 An interactive simulator and pseudo-spectral solver for the **Korteweg–de Vries (KdV) equation** — the canonical model of nonlinear dispersive waves and the birthplace of the *soliton*.
 
 Build an initial condition from solitons and Gaussian packets, preview it, then watch it evolve: solitons travel at amplitude-dependent speeds, pass *through* each other unchanged, and a smooth hump shatters into a rank-ordered train of solitons plus a dispersive tail.
@@ -16,12 +18,18 @@ $$u_t + 6\,u\,u_x + u_{xxx} = 0$$
 - **Superpositions** — mix any number of solitons and Gaussians in the same domain and watch them interact.
 - **Periodic domain** — waves that leave one side re-enter the other; the simulator auto-sizes the final time to one full lap of the slowest component.
 
+- **Conserved quantities** — mass `∫u dx`, momentum `∫u² dx`, and energy `∫(2u³ − u_x²) dx` are tracked over time; they stay flat, demonstrating KdV's integrability and doubling as an accuracy check.
+- **FPUT recurrence preset** — the Zabusky–Kruskal cosine that breaks into a soliton train and nearly reassembles (see below).
+
 ### Interactive web app
 
 - Live **preview of the initial condition** at `t=0` before you run.
-- Add/remove solitons and Gaussians, each with stepper arrows.
+- Add/remove solitons, Gaussians, and cosine waves, each with stepper arrows.
+- **Auto-resolution**: the grid and time step are chosen automatically to resolve and stably evolve even tall, narrow solitons.
+- **Space–time (x, t) heatmap** showing soliton trajectories and collisions at a glance.
+- **Conserved-quantities plot** (drift from t=0).
+- **Playback controls** (play/pause, scrub, speed) and **export** to CSV/PNG plus a shareable URL.
 - Amplitude-aware time window, fixed y-axis (no jitter), clean axis labels.
-- Smooth playback of the time evolution.
 
 ---
 
