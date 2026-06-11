@@ -330,8 +330,38 @@
     <script>
         // Chart setup
         const ctx = document.getElementById('solitonChart').getContext('2d');
+
+        // Display index of the physical origin (x = 0) in the current view.
+        let originIndex = 0;
+
+        // Draw a dashed vertical line at x = 0 so the origin is clear even when
+        // the periodic view is rolled.
+        const originLinePlugin = {
+            id: 'originLine',
+            afterDatasetsDraw(chart) {
+                const { ctx, chartArea, scales } = chart;
+                if (!chartArea || !chart.data.labels.length) return;
+                const xPix = scales.x.getPixelForValue(originIndex);
+                if (xPix < chartArea.left - 1 || xPix > chartArea.right + 1) return;
+                ctx.save();
+                ctx.strokeStyle = 'rgba(44, 62, 80, 0.65)';
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([5, 4]);
+                ctx.beginPath();
+                ctx.moveTo(xPix, chartArea.top);
+                ctx.lineTo(xPix, chartArea.bottom);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.fillStyle = 'rgba(44, 62, 80, 0.9)';
+                ctx.font = '11px sans-serif';
+                ctx.fillText('x = 0', xPix + 3, chartArea.top + 12);
+                ctx.restore();
+            }
+        };
+
         let solitonChart = new Chart(ctx, {
             type: 'line',
+            plugins: [originLinePlugin],
             data: {
                 labels: [],
                 datasets: [{
@@ -463,26 +493,28 @@
         let viewSource = null;   // { values: number[], L: number }
 
         // Redraw the main profile chart for the current view shift: roll the
-        // field so the window starts at x0 = viewStartFrac * L, and label the
-        // x-axis with the (unwrapped) physical positions x0 .. x0 + L.
+        // field so the window starts at x0 = viewStartFrac * L. Each sample
+        // keeps its TRUE physical position as its label, wrapped into [0, L),
+        // and a vertical marker shows where x = 0 sits in the rolled view.
         function redrawProfile() {
             if (!viewSource) return;
             const { values, L } = viewSource;
             const n = values.length;
             const dx = L / n;
             const k = (((Math.round(viewStartFrac * n)) % n) + n) % n;
-            const x0 = viewStartFrac * L;
             const data = new Array(n);
             const labels = new Array(n);
             for (let i = 0; i < n; i++) {
-                data[i] = values[(i + k) % n];
-                labels[i] = x0 + i * dx;
+                const j = (i + k) % n;       // physical sample index shown here
+                data[i] = values[j];
+                labels[i] = j * dx;          // physical position, always in [0, L)
             }
+            originIndex = (n - k) % n;        // display index whose position is 0
             solitonChart.data.labels = labels;
             solitonChart.data.datasets[0].data = data;
             solitonChart.update();
             const lbl = document.getElementById('view-start-label');
-            if (lbl) lbl.textContent = x0.toFixed(0);
+            if (lbl) lbl.textContent = (k * dx).toFixed(0);
         }
 
         // --- Soliton list state ---------------------------------------------
