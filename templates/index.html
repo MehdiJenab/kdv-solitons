@@ -142,15 +142,34 @@
         #export-csv:hover, #export-png:hover, #share-btn:hover { background-color: #616a6b; }
         .section-title { color: #2c3e50; margin: 24px 0 6px; font-size: 16px; }
         .heatmap-wrap { width: 100%; }
+        .hm-row { display: flex; }
+        .hm-yaxis {
+            width: 56px;
+            height: 280px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: flex-end;
+            padding-right: 6px;
+            color: #7f8c8d;
+            font-size: 12px;
+        }
+        .hm-yaxis .hm-mid {
+            margin: auto 0;
+            writing-mode: vertical-rl;
+            transform: rotate(180deg);
+        }
         #heatmapCanvas {
-            width: 100%;
+            flex: 1;
+            min-width: 0;
             height: 280px;
             border: 1px solid #d6dbdf;
             border-radius: 4px;
         }
-        .heatmap-axis {
+        .hm-xaxis {
             display: flex;
             justify-content: space-between;
+            margin-left: 56px;
             color: #7f8c8d;
             font-size: 12px;
             margin-top: 2px;
@@ -261,11 +280,20 @@
         </div>
 
         <div id="extra-views" style="display:none">
-            <h3 class="section-title">Space–time diagram — u(x, t)</h3>
+            <h3 class="section-title">Space–time diagram — u(x, t)  (color = amplitude)</h3>
             <div class="heatmap-wrap">
-                <canvas id="heatmapCanvas" width="900" height="280"></canvas>
-                <div class="heatmap-axis">
-                    <span>t = 0</span><span id="heatmap-tmax">t</span>
+                <div class="hm-row">
+                    <div class="hm-yaxis">
+                        <span>t = 0</span>
+                        <span class="hm-mid">time ↓</span>
+                        <span id="heatmap-tmax">t</span>
+                    </div>
+                    <canvas id="heatmapCanvas" width="900" height="280"></canvas>
+                </div>
+                <div class="hm-xaxis">
+                    <span>x = 0</span>
+                    <span>position x →</span>
+                    <span id="heatmap-xmax">x</span>
                 </div>
             </div>
 
@@ -324,9 +352,33 @@
 
         // Conserved-quantities chart (drift of each invariant from t = 0)
         const invCtx = document.getElementById('invariantsChart').getContext('2d');
-        const invColors = ['#2980b9', '#27ae60', '#c0392b'];
+        const invColors = ['#2980b9', '#f39c12', '#8e44ad'];
+        const CONSERVATION_TOL = 1.0;  // percent: the "acceptable" green band
+
+        // Shade the plot: green within ±tol %, red beyond — so a run that
+        // conserves its invariants stays in the green, and any violation that
+        // pushes a curve past ±1% visibly enters the red zone.
+        const conservationBandPlugin = {
+            id: 'conservationBand',
+            beforeDraw(chart) {
+                const { ctx, chartArea, scales } = chart;
+                if (!chartArea) return;
+                const y = scales.y;
+                const yHi = y.getPixelForValue(Math.min(CONSERVATION_TOL, y.max));
+                const yLo = y.getPixelForValue(Math.max(-CONSERVATION_TOL, y.min));
+                const x = chartArea.left, w = chartArea.right - chartArea.left;
+                ctx.save();
+                ctx.fillStyle = 'rgba(231, 76, 60, 0.08)';   // red everywhere
+                ctx.fillRect(x, chartArea.top, w, chartArea.bottom - chartArea.top);
+                ctx.fillStyle = 'rgba(39, 174, 96, 0.14)';   // green acceptable band
+                ctx.fillRect(x, yHi, w, yLo - yHi);
+                ctx.restore();
+            }
+        };
+
         let invariantsChart = new Chart(invCtx, {
             type: 'line',
+            plugins: [conservationBandPlugin],
             data: {
                 labels: [],
                 datasets: ['mass', 'momentum', 'energy'].map((name, i) => ({
@@ -349,6 +401,8 @@
                         ticks: { maxTicksLimit: 8, maxRotation: 0, precision: 2 }
                     },
                     y: {
+                        min: -CONSERVATION_TOL,
+                        max: CONSERVATION_TOL,
                         title: { display: true, text: 'relative drift (%)' },
                         ticks: {
                             callback: (v) => {
@@ -873,13 +927,19 @@
                 }
             }
             hctx.putImageData(img, 0, 0);
+            // Vertical axis = time (top is t=0); horizontal axis = position x.
             document.getElementById('heatmap-tmax').textContent =
                 't = ' + run.times[rows - 1].toFixed(2);
+            const dxg = run.gridPoints.length > 1
+                ? run.gridPoints[1] - run.gridPoints[0] : 0;
+            const L = run.gridPoints[run.gridPoints.length - 1] + dxg;
+            document.getElementById('heatmap-xmax').textContent = 'x = ' + L.toFixed(0);
         }
 
         // --- Conserved-quantities drift chart -------------------------------
         function drawInvariants(run) {
             if (!run.invariants) return;
+            let maxAbs = 0;
             ['mass', 'momentum', 'energy'].forEach((k, i) => {
                 const arr = run.invariants[k];
                 const base = arr[0];
@@ -890,11 +950,17 @@
                 if (scale < 1e-9) {
                     scale = Math.max(1e-9, ...arr.map(Math.abs));
                 }
-                invariantsChart.data.datasets[i].data = run.times.map((t, j) => ({
-                    x: t,
-                    y: (100 * (arr[j] - base)) / scale
-                }));
+                invariantsChart.data.datasets[i].data = run.times.map((t, j) => {
+                    const pct = (100 * (arr[j] - base)) / scale;
+                    if (Math.abs(pct) > maxAbs) maxAbs = Math.abs(pct);
+                    return { x: t, y: pct };
+                });
             });
+            // Keep the reference band at ±1%; expand only if a real violation
+            // exceeds it, so a conserved run reads as a flat line in the green.
+            const bound = Math.max(CONSERVATION_TOL, Math.ceil(maxAbs));
+            invariantsChart.options.scales.y.min = -bound;
+            invariantsChart.options.scales.y.max = bound;
             invariantsChart.update();
         }
 
