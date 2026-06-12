@@ -14,7 +14,9 @@ from kdv_solver.solver import (
     conserved_quantities,
     cosine_wave,
     gaussian_packet,
+    mode_energies,
     multi_soliton_field,
+    predict_soliton_amplitudes,
     soliton_profile,
 )
 
@@ -157,3 +159,33 @@ class TestConservedQuantities:
         last = conserved_quantities(problem, solutions[-1])
         for i0, i1 in zip(first, last):
             assert i1 == pytest.approx(i0, rel=1e-4, abs=1e-6)
+
+
+class TestInverseScattering:
+    """Predicting emergent solitons from the initial condition."""
+
+    def test_single_soliton_one_bound_state(self) -> None:
+        grid = Grid(512, 80.0)
+        problem = KdVProblem(grid, kappa=0.8)
+        amps = predict_soliton_amplitudes(grid, problem.initial_condition())
+        assert len(amps) == 1
+        assert amps[0] == pytest.approx(2 * 0.8**2, rel=0.05)
+
+    def test_two_solitons_predicted(self) -> None:
+        grid = Grid(1024, 80.0)
+        u0 = multi_soliton_field(grid, [(1.0, 20.0), (0.6, 50.0)])
+        amps = predict_soliton_amplitudes(grid, u0)
+        assert len(amps) == 2
+        assert amps == pytest.approx([2.0, 0.72], abs=0.05)
+
+
+class TestModeEnergies:
+    """Fourier mode-energy decomposition."""
+
+    def test_cosine_energy_in_first_mode(self) -> None:
+        grid = Grid(256, 20.0)
+        e = mode_energies(cosine_wave(grid, 0.9, mode=1), n_modes=6)
+        assert len(e) == 6
+        # All the energy is in mode 1 for a single cosine.
+        assert e[0] > 0
+        assert np.all(e[1:] < 1e-6 * e[0])

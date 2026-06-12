@@ -36,4 +36,4 @@ jobs:
         run: mypy src/
 
       - name: Tests + coverage
-        run: pytest
+        run: pytest --cov=kdv_solver --cov-report=term-missing

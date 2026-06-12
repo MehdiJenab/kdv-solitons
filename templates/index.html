@@ -81,13 +81,13 @@
         #add-soliton:hover, #add-gaussian:hover, #add-cosine:hover {
             background-color: #1e8449;
         }
-        #preset-fput {
-            padding: 6px 14px;
+        .preset-btn {
+            padding: 6px 12px;
             font-size: 13px;
             margin: 0;
             background-color: #8e44ad;
         }
-        #preset-fput:hover { background-color: #6c3483; }
+        .preset-btn:hover { background-color: #6c3483; }
         #solitons-list { margin-top: 10px; }
         .soliton-row {
             display: flex;
@@ -207,11 +207,13 @@
         <h1>KdV Soliton Propagation Simulator</h1>
 
         <div class="controls">
-            <div class="control-group">
+            <div class="control-group view-controls">
                 <label>Presets:</label>
-                <button type="button" id="preset-fput" title="Zabusky-Kruskal cosine that breaks into solitons and recurs">
-                    ⟳ FPUT recurrence (Zabusky–Kruskal)
-                </button>
+                <button type="button" class="preset-btn" id="preset-fput" title="Zabusky-Kruskal cosine that breaks into solitons and recurs">⟳ FPUT recurrence</button>
+                <button type="button" class="preset-btn" id="preset-two">Two-soliton overtaking</button>
+                <button type="button" class="preset-btn" id="preset-three">Three solitons</button>
+                <button type="button" class="preset-btn" id="preset-gauss">Gaussian breakup</button>
+                <button type="button" class="preset-btn" id="preset-depression">Depression (radiation)</button>
             </div>
 
             <div class="control-group soliton-section" id="soliton-controls">
@@ -318,6 +320,12 @@
                     <span>position x →</span>
                     <span id="heatmap-xmax">x</span>
                 </div>
+            </div>
+            <div id="predicted-solitons" class="derived" style="margin-top:6px"></div>
+
+            <h3 class="section-title">Fourier mode energy — |û_k|² of the lowest modes (FPUT view)</h3>
+            <div class="chart-container small">
+                <canvas id="modeEnergyChart"></canvas>
             </div>
 
             <h3 class="section-title">Conserved quantities — relative drift (%) (should stay ≈ 0)</h3>
@@ -471,6 +479,39 @@
             }
         });
 
+        // Fourier mode-energy chart (energy in the lowest modes over time)
+        const modeCtx = document.getElementById('modeEnergyChart').getContext('2d');
+        const modeColors = ['#e74c3c', '#e67e22', '#f1c40f', '#27ae60', '#2980b9', '#8e44ad'];
+        let modeEnergyChart = new Chart(modeCtx, {
+            type: 'line',
+            data: {
+                datasets: modeColors.map((c, i) => ({
+                    label: 'mode ' + (i + 1),
+                    data: [],
+                    borderColor: c,
+                    backgroundColor: c,
+                    borderWidth: 2,
+                    tension: 0.2,
+                    pointRadius: 0
+                }))
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        type: 'linear',
+                        title: { display: true, text: 'Time (t)' },
+                        ticks: { maxTicksLimit: 8, maxRotation: 0 }
+                    },
+                    y: {
+                        min: 0,
+                        title: { display: true, text: 'mode energy (normalized)' }
+                    }
+                }
+            }
+        });
+
         // Update parameter displays for the global (non-soliton) controls
         function updateParamDisplays() {
             document.getElementById('N-value').textContent = document.getElementById('N').value;
@@ -586,7 +627,7 @@
             row.innerHTML = `
                 <span class="tag"></span>
                 <label>amplitude</label>
-                <input type="number" class="g-amp" min="0.1" max="3.0" step="0.1">
+                <input type="number" class="g-amp" min="-3.0" max="3.0" step="0.1">
                 <label>center</label>
                 <input type="number" class="g-x0" min="0" step="1">
                 <label>width (σ)</label>
@@ -814,27 +855,43 @@
             updateFinalTimeForLap();
         });
 
-        // Zabusky-Kruskal / FPUT recurrence preset: a single cosine on a small
-        // domain that breaks into ~3 solitons and nearly reassembles near t≈9
-        // (and again near t≈18).
-        document.getElementById('preset-fput').addEventListener('click', () => {
-            solitons = [];
-            gaussians = [];
-            cosines = [{ amplitude: 0.9, mode: 1 }];
-            document.getElementById('N').value = 512;
-            document.getElementById('L').value = 20;
-            document.getElementById('dt').value = 0.002;
+        // Apply a named scenario: set components + global params, preview it.
+        function applyPreset(cfg) {
+            solitons = (cfg.solitons || []).map(s => ({ ...s }));
+            gaussians = (cfg.gaussians || []).map(g => ({ ...g }));
+            cosines = (cfg.cosines || []).map(c => ({ ...c }));
+            document.getElementById('N').value = cfg.N;
+            document.getElementById('L').value = cfg.L;
+            document.getElementById('dt').value = cfg.dt;
             renderSolitons();
             renderGaussians();
             renderCosines();
-            // Set the time window to span two recurrences; user can still edit it.
             const tf = document.getElementById('t_final');
             tf.min = 0.1;
-            tf.max = 40;
-            tf.step = 0.1;
-            tf.value = 18;
+            tf.max = Math.max(40, 2 * cfg.t_final).toFixed(2);
+            tf.step = (cfg.t_final / 100).toFixed(4);
+            tf.value = cfg.t_final;
+            viewStartFrac = 0;
+            const vs = document.getElementById('view-shift');
+            if (vs) vs.value = 0;
             updateParamDisplays();
             previewInitialCondition();
+        }
+
+        const PRESETS = {
+            // Zabusky-Kruskal cosine: breaks into ~3 solitons, recurs near t≈9 & 18.
+            'preset-fput': { N: 512, L: 20, dt: 0.002, t_final: 18, cosines: [{ amplitude: 0.9, mode: 1 }] },
+            // Tall/fast soliton overtakes a short/slow one and passes through.
+            'preset-two': { N: 512, L: 60, dt: 0.005, t_final: 20, solitons: [{ kappa: 1.0, x0: 15 }, { kappa: 0.6, x0: 35 }] },
+            // Three solitons of decreasing height.
+            'preset-three': { N: 512, L: 80, dt: 0.004, t_final: 25, solitons: [{ kappa: 1.2, x0: 12 }, { kappa: 0.9, x0: 32 }, { kappa: 0.6, x0: 52 }] },
+            // A smooth hump dispersing into a soliton train + radiation.
+            'preset-gauss': { N: 512, L: 100, dt: 0.005, t_final: 15, gaussians: [{ amplitude: 1.0, x0: 30, width: 3.0 }] },
+            // A negative hump: no solitons, only dispersive radiation.
+            'preset-depression': { N: 512, L: 80, dt: 0.004, t_final: 12, gaussians: [{ amplitude: -1.0, x0: 40, width: 4.0 }] }
+        };
+        Object.keys(PRESETS).forEach(id => {
+            document.getElementById(id).addEventListener('click', () => applyPreset(PRESETS[id]));
         });
 
         // Clamp any number input to its [min, max] on blur/enter, then re-fire
@@ -1083,6 +1140,36 @@
             invariantsChart.update();
         }
 
+        // --- Fourier mode-energy chart (FPUT view) --------------------------
+        function drawModeEnergy(data) {
+            const series = data.mode_energy;
+            if (!series) return;
+            let gmax = 0;
+            for (const s of series) for (const v of s) { if (v > gmax) gmax = v; }
+            gmax = gmax || 1;
+            series.forEach((s, i) => {
+                modeEnergyChart.data.datasets[i].data =
+                    data.times.map((t, j) => ({ x: t, y: s[j] / gmax }));
+            });
+            modeEnergyChart.update();
+        }
+
+        // --- Inverse-scattering prediction caption --------------------------
+        function drawPredicted(data) {
+            const amps = data.predicted_solitons || [];
+            const el = document.getElementById('predicted-solitons');
+            if (amps.length) {
+                el.textContent =
+                    `Inverse scattering predicts ${amps.length} ` +
+                    `soliton${amps.length > 1 ? 's' : ''} — amplitudes: ` +
+                    `${amps.map(a => a.toFixed(2)).join(', ')} ` +
+                    `(compare with the peaks in the diagram above).`;
+            } else {
+                el.textContent =
+                    'Inverse scattering predicts no solitons — this field radiates away.';
+            }
+        }
+
         // --- Export & share -------------------------------------------------
         function downloadBlob(content, filename, type) {
             const blob = new Blob([content], { type });
@@ -1188,6 +1275,8 @@
 
                 drawHeatmap(lastRun);
                 drawInvariants(lastRun);
+                drawModeEnergy(data);
+                drawPredicted(data);
 
                 const ar = data.auto_resolution;
                 const arNote = ar

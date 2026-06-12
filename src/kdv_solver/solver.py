@@ -126,6 +126,79 @@ def conserved_quantities(
     return mass, momentum, energy
 
 
+def predict_soliton_amplitudes(
+    grid: "Grid", u: np.ndarray, max_points: int = 512, cutoff: float = 0.02
+) -> list[float]:
+    """
+    Predict the amplitudes of the solitons that ``u`` will evolve into.
+
+    By the inverse-scattering theory of KdV, the asymptotic solitons of an
+    initial field ``u(x,0)`` are the bound states (negative eigenvalues) of the
+    Schroedinger operator ``-d^2/dx^2 - u``. An eigenvalue ``-kappa^2`` yields a
+    soliton of amplitude ``2*kappa^2``. This solves that eigenproblem on the
+    (optionally down-sampled) grid and returns the predicted amplitudes,
+    largest first -- before any time stepping.
+
+    Args:
+        grid: Discretization grid
+        u: Initial field
+        max_points: Down-sample to at most this many points for the eigensolve
+        cutoff: Ignore predicted amplitudes below ``cutoff * max(u)`` (radiation)
+
+    Returns:
+        Predicted soliton amplitudes, largest first
+    """
+    n = len(u)
+    if n > max_points:
+        idx = np.linspace(0, n, max_points, endpoint=False).astype(int)
+        u_s = u[idx]
+    else:
+        u_s = u
+    m = len(u_s)
+    dx = grid.L / m
+
+    # Periodic finite-difference second derivative.
+    d2 = (
+        np.diag(-2.0 * np.ones(m))
+        + np.diag(np.ones(m - 1), 1)
+        + np.diag(np.ones(m - 1), -1)
+    ) / dx**2
+    d2[0, -1] += 1.0 / dx**2
+    d2[-1, 0] += 1.0 / dx**2
+
+    operator = -d2 - np.diag(u_s)
+    eigenvalues = np.linalg.eigvalsh(operator)
+
+    threshold = cutoff * max(float(np.max(u)), 1e-9)
+    amplitudes = [
+        2.0 * (-lam) for lam in eigenvalues if lam < 0 and 2.0 * (-lam) > threshold
+    ]
+    return sorted(amplitudes, reverse=True)
+
+
+def mode_energies(u: np.ndarray, n_modes: int = 6) -> np.ndarray:
+    """
+    Energy in the first ``n_modes`` Fourier modes of ``u`` (k = 1..n_modes).
+
+    Returns ``|u_hat_k|^2`` for the lowest non-constant modes. Tracking these
+    over time visualizes the Fermi-Pasta-Ulam-Tsingou picture: energy that
+    stays trapped in a few low modes (recurrence) versus spreading to many.
+
+    Args:
+        u: Field on the grid
+        n_modes: Number of low modes to return
+
+    Returns:
+        Array of length ``n_modes`` with the per-mode energy.
+    """
+    u_hat = np.fft.rfft(u)
+    energy = np.abs(u_hat) ** 2
+    out = np.zeros(n_modes)
+    available = min(n_modes, len(energy) - 1)
+    out[:available] = energy[1 : 1 + available]
+    return out
+
+
 def cosine_wave(grid: "Grid", amplitude: float, mode: int = 1) -> np.ndarray:
     """
     Build a cosine initial condition: ``A * cos(2*pi*mode*x / L)``.

@@ -13,7 +13,9 @@ from kdv_solver.solver import (
     conserved_quantities,
     cosine_wave,
     gaussian_packet,
+    mode_energies,
     multi_soliton_field,
+    predict_soliton_amplitudes,
 )
 
 app = Flask(__name__)
@@ -104,6 +106,18 @@ def simulate():
         # First three KdV invariants per snapshot (should stay flat).
         invariants = [conserved_quantities(problem, u) for u in solutions]
 
+        # Fourier mode energy per snapshot (FPUT view): transpose to per-mode
+        # time series for the first few modes.
+        n_modes = 6
+        per_frame = [mode_energies(u, n_modes) for u in solutions]
+        mode_series = [
+            [float(per_frame[f][k]) for f in range(len(solutions))]
+            for k in range(n_modes)
+        ]
+
+        # Inverse-scattering prediction of the emergent soliton amplitudes.
+        predicted = predict_soliton_amplitudes(grid, u0)
+
         # Report the resolution actually used so the client plots correctly.
         params = dict(params)
         params["N"] = n_used
@@ -118,6 +132,8 @@ def simulate():
                     "momentum": [iv[1] for iv in invariants],
                     "energy": [iv[2] for iv in invariants],
                 },
+                "mode_energy": mode_series,
+                "predicted_solitons": predicted,
                 "params": params,
                 "auto_resolution": {"N": n_used, "dt": dt},
             }

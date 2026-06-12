@@ -19,7 +19,9 @@ $$u_t + 6\,u\,u_x + u_{xxx} = 0$$
 - **Periodic domain** — waves that leave one side re-enter the other; the simulator auto-sizes the final time to one full lap of the slowest component.
 
 - **Conserved quantities** — mass `∫u dx`, momentum `∫u² dx`, and energy `∫(2u³ − u_x²) dx` are tracked over time; they stay flat, demonstrating KdV's integrability and doubling as an accuracy check.
-- **FPUT recurrence preset** — the Zabusky–Kruskal cosine that breaks into a soliton train and nearly reassembles (see below).
+- **Inverse-scattering prediction** — the emergent soliton amplitudes are predicted *before* running, from the bound states (negative eigenvalues) of the Schrödinger operator `−∂² − u`.
+- **Fourier mode energy** — energy per low mode over time, the Fermi–Pasta–Ulam–Tsingou view of where the energy goes.
+- **Presets** — one-click scenarios: FPUT recurrence, two-soliton overtaking, three solitons, Gaussian breakup, and a depression (radiation, no solitons).
 
 ### Interactive web app
 
@@ -67,9 +69,22 @@ pip install -e ".[dev]"
 ## Run the web app
 
 ```bash
+pip install -e ".[web]"   # installs Flask
 python simple_web_app.py
 # open http://localhost:5001
 ```
+
+### Or with Docker
+
+```bash
+docker build -t soliton-lab .
+docker run -p 5001:5001 soliton-lab
+# open http://localhost:5001
+```
+
+The image installs only the runtime (package + Flask) and serves the app on
+port 5001 — drop it on any container host (Render, Fly.io, a VM, etc.) for a
+live demo.
 
 Choose your initial condition (add solitons and/or Gaussians), check the live preview, then **Run Simulation**.
 
